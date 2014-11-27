@@ -1,0 +1,581 @@
+<?php 
+2  
+3 /** 
+4  * MiniDexPHP
+5  * 
+6  * @author jamile10
+7  * @version 1.1.0 
+8  * @link  http://jamile10.nl
+9  * 
+10  */ 
+11 class MiniDexPHP
+12 { 
+13     private $options; 
+14  
+15     public function  __construct($input = array()) 
+16     { 
+17         $this->options = array_merge( 
+18             array( 
+19                 'api_key'               => '', 
+20                 'cache_time'            => '600', 
+21                 'cache_folder_player'   => $_SERVER['DOCUMENT_ROOT'] . '/cache/MiniDexAPI/player/', 
+22                 'cache_uuid_table'      => 'uuid_table.json', 
+23                 'cache_folder_guild'    => $_SERVER['DOCUMENT_ROOT'] . '/cache/MiniDexAPI/guild/', 
+24                 'cache_byPlayer_table'  => 'byPlayer_table.json', 
+25                 'cache_byName_table'    => 'byName_table.json', 
+26                 'cache_folder_friends'  => $_SERVER['DOCUMENT_ROOT'] . '/cache/MiniDexAPI/friends/', 
+27                 'cache_folder_sessions' => $_SERVER['DOCUMENT_ROOT'] . '/cache/MiniDexAPI/sessions/', 
+28                 'version'               => '1.1' 
+29             ), 
+30             $input 
+31         ); 
+32  
+33         if(!file_exists($this->options['cache_folder_player'])) { 
+34             mkdir($this->options['cache_folder_player'], 0777, true); 
+35         } 
+36  
+37         if(!file_exists($this->options['cache_folder_guild'])) { 
+38             mkdir($this->options['cache_folder_guild'], 0777, true); 
+39         } 
+40  
+41         if(!file_exists($this->options['cache_folder_friends'])) { 
+42             mkdir($this->options['cache_folder_friends'], 0777, true); 
+43         } 
+44  
+45         if(!file_exists($this->options['cache_folder_sessions'])) { 
+46             mkdir($this->options['cache_folder_sessions'], 0777, true); 
+47         } 
+48     } 
+49  
+50     public function set($input) 
+51     { 
+52         foreach($input as $key=>$val) 
+53         { 
+54             $this->options[$key] = $val; 
+55         } 
+56     } 
+57  
+58     public function getVersion() 
+59     { 
+60         return $this->options['version']; 
+61     } 
+62  
+63     public function setKey($key) 
+64     { 
+65         $this->options['api_key'] = $key; 
+66     } 
+67     public function getKey() 
+68     { 
+69         return $this->options['api_key']; 
+70     } 
+71  
+72     public function getOptions() 
+73     { 
+74         return $this->options; 
+75     } 
+76  
+77     public function fetch($request, $key, $val) 
+78     { 
+79         $response = @file_get_contents('https://api.hypixel.net/' . $request . '?key=' . $this->getKey() . '&' . $key . '=' . $val); 
+80         return json_decode($response, true); 
+81     } 
+82  
+83     public function getPlayer($keypair = array()) 
+84     { 
+85         $pairs = array_merge( 
+86             array( 
+87                 'name' => '', 
+88                 'uuid' => '' 
+89             ), 
+90             $keypair 
+91         ); 
+92  
+93         foreach ($pairs as $key => $val) { 
+94             $val = strtolower($val); 
+95             if ($val != '') { 
+96                 if ($key == 'uuid') { 
+97                     $filename = $this->options['cache_folder_player'] . $this->options['cache_uuid_table']; 
+98                     $content = json_decode($this->getContent($filename), true); 
+99  
+100                     if(array_key_exists($val, $content)) 
+101                     { 
+102                         if(time() - $this->options['cache_time'] < $content[$val]['timestamp']) 
+103                         { 
+104                             return $this->getPlayer(array('name'=>$content[$val]['name'])); 
+105                         } 
+106                     } 
+107  
+108                     $response = $this->fetch('player', $key, $val); 
+109                     if ($response['success']) { 
+110                         $content[$val] = array('timestamp'=>time(), 'name'=>$response['player']['displayname']); 
+111                         $this->setContent($filename, json_encode($content)); 
+112                         return new Player($response['player'], $this); 
+113                     } 
+114  
+115                 } 
+116  
+117                 if ($key == 'name') { 
+118                     $filename = $this->options['cache_folder_player'] . $key . '/' . $this->getCacheFileName($val) . '.json'; 
+119  
+120                     if (file_exists($filename)) { 
+121                         if (time() - $this->options['cache_time'] < filemtime($filename)) { 
+122                             $content = json_decode($this->getContent($filename), true); 
+123                             return new Player($content, $this); 
+124                         } 
+125                     } else { 
+126                         @mkdir(dirname($filename), 0777, true); 
+127                     } 
+128  
+129                     $response = $this->fetch('player', $key, $val); 
+130                     if ($response['success']) { 
+131                         $this->setContent($filename, json_encode($response['player'])); 
+132                         return new Player($response['player'], $this); 
+133                     } 
+134                 } 
+135             } 
+136         } 
+137         return new Player(null, $this); 
+138     } 
+139     public function getGuild($keypair = array()) 
+140     { 
+141         $pairs = array_merge( 
+142             array( 
+143                 'byPlayer' => '', 
+144                 'byName'   => '', 
+145                 'id'       => '' 
+146             ), 
+147             $keypair 
+148         ); 
+149  
+150         foreach ($pairs as $key => $val) { 
+151             if ($val != '') { 
+152                 $val = str_replace(' ', '%20', $val); 
+153                 if ($key == 'byPlayer' || $key == 'byName') { 
+154                     $filename = $this->options['cache_folder_guild'] . $this->options['cache_' . $key . '_table']; 
+155                     $content = json_decode($this->getContent($filename), true); 
+156  
+157                     if (array_key_exists($val, $content)) { 
+158                         if (time() - $this->options['cache_time'] < $content[$val]['timestamp']) { 
+159                             return $this->getGuild(array('id' => $content[$val]['guild'])); 
+160                         } 
+161                     } 
+162  
+163                     // new/update entry 
+164                     $response = $this->fetch('findGuild', $key, $val); 
+165                     if ($response['success']) { 
+166                         $content[$val] = array('timestamp' => time(), 'guild' => $response['guild']); 
+167                         $this->setContent($filename, json_encode($content)); 
+168                         return $this->getGuild(array('id' => $response['guild'])); 
+169                     } 
+170                 } 
+171  
+172                 if ($key == 'id') { 
+173                     $filename = $this->options['cache_folder_guild'] . $key . '/' . $val . '.json'; 
+174                     if (file_exists($filename)) { 
+175                         if (time() - $this->options['cache_time'] < filemtime($filename)) { 
+176                             $content = json_decode($this->getContent($filename), true); 
+177                             return new Guild($content['guild'], $this); 
+178                         } 
+179                     } else { 
+180                         @mkdir(dirname($filename), 0777, true); 
+181                     } 
+182  
+183                     // new/update entry 
+184                     $response = $this->fetch('guild', $key, $val); 
+185                     if ($response['success']) { 
+186                         $this->setContent($filename, json_encode($response)); 
+187                         return new Guild($response['guild'], $this); 
+188                     } 
+189                 } 
+190             } 
+191         } 
+192         return new Guild(null, $this); 
+193     } 
+194     public function getSession($keypair = array()) 
+195     { 
+196         $pairs = array_merge( 
+197             array( 
+198                 'player' => '' 
+199             ), 
+200             $keypair 
+201         ); 
+202  
+203         foreach ($pairs as $key => $val) { 
+204             $val = strtolower($val); 
+205             if ($val != '') { 
+206                 if ($key == 'player') { 
+207                     $filename = $this->options['cache_folder_sessions'] . $key . '/' . $this->getCacheFileName($val) . '.json'; 
+208                     if (file_exists($filename)) { 
+209                         if (time() - $this->options['cache_time'] < filemtime($filename)) { 
+210                             $content = $this->getContent($filename); 
+211                             $json = json_decode($content, true); 
+212                             return new Session($json, $this); 
+213                         } 
+214                     } else { 
+215                         @mkdir(dirname($filename), 0777, true); 
+216                     } 
+217  
+218                     $response = $this->fetch('session', $key, $val); 
+219                     if ($response['success']) { 
+220                         $this->setContent($filename, json_encode($response['session'])); 
+221                         return new Session($response['session'], $this); 
+222                     } 
+223                 } 
+224             } 
+225         } 
+226         return new Session(null, $this);; 
+227     } 
+228     public function getFriends($keypair = array()) 
+229     { 
+230         $pairs = array_merge( 
+231             array( 
+232                 'player' => '' 
+233             ), 
+234             $keypair 
+235         ); 
+236  
+237         foreach ($pairs as $key => $val) { 
+238             $val = strtolower($val); 
+239             if ($val != '') { 
+240                 if ($key == 'player') { 
+241                     $filename = $this->options['cache_folder_friends'] . $key . '/' . $this->getCacheFileName($val) . '.json'; 
+242                     if (file_exists($filename)) { 
+243                         if (time() - $this->options['cache_time'] < filemtime($filename)) { 
+244                             $content = $this->getContent($filename); 
+245                             $json = json_decode($content, true); 
+246                             return new Session($json, $this); 
+247                         } 
+248                     } else { 
+249                         @mkdir(dirname($filename), 0777, true); 
+250                     } 
+251  
+252                     $response = $this->fetch('friends', $key, $val); 
+253                     if ($response['success']) { 
+254                         $this->setContent($filename, json_encode($response['records'])); 
+255                         return new Session($response['records'], $this); 
+256                     } 
+257                 } 
+258             } 
+259         } 
+260         return new Friends(null, $this); 
+261     } 
+262  
+263     private function getContent($filename) 
+264     { 
+265         @mkdir(dirname($filename), 0777, true); 
+266         $content = json_encode(array()); 
+267         if (!file_exists($filename)) { 
+268             $file = fopen($filename, 'w'); 
+269             fwrite($file, $content); 
+270             fclose($file); 
+271         } else { 
+272             $file = fopen($filename, 'r'); 
+273             $content = fread($file, filesize($filename)); 
+274             fclose($file); 
+275         } 
+276         return $content; 
+277     } 
+278  
+279     private function setContent($filename, $content) 
+280     { 
+281         @mkdir(dirname($filename), 0777, true); 
+282         $file = fopen($filename, 'w'); 
+283         fwrite($file, $content); 
+284         fclose($file); 
+285     } 
+286  
+287     private function getCacheFileName($input) 
+288     { 
+289         if(strlen($input) < 3 ) { 
+290             return implode('/', str_split($input, 1)); 
+291         } 
+292         return substr($input, 0, 1) . '/' . substr($input, 1, 1) . '/' . substr($input, 2); 
+293     } 
+294  
+295 } 
+296  
+297 class HypixelObject { 
+298     public $JSONArray; 
+299     public $api; 
+300  
+301     public function __construct($json, $api) 
+302     { 
+303         $this->JSONArray = $json; 
+304         $this->api = $api; 
+305     } 
+306  
+307     public function isNull() { 
+308         return $this->getRaw() == null; 
+309     } 
+310  
+311     public function getRaw() 
+312     { 
+313         return $this->JSONArray; 
+314     } 
+315  
+316     public function get($key, $implicit = false, $default = null) 
+317     { 
+318         if($this->isNull()) return $default; 
+319         if(!$implicit) 
+320         { 
+321             $return = $this->JSONArray; 
+322             foreach(explode(".", $key) as $split) 
+323             { 
+324                 if(in_array($split, array_keys($return))) { 
+325                     $return = $return[$split]; 
+326                 } else { 
+327                     return $default; 
+328                 } 
+329  
+330             } 
+331             return $return ? $return : $default; 
+332         } 
+333         return in_array($key, array_keys($this->JSONArray)) ? $this->JSONArray[$key] : $default; 
+334     } 
+335  
+336     public function getId() 
+337     { 
+338         return $this->get('_id', true); 
+339     } 
+340 } 
+341  
+342 class Player extends HypixelObject { 
+343     public function getSession() 
+344     { 
+345         return $this->api->getSession(array('player'=>$this->getName())); 
+346     } 
+347  
+348     public function getFriends() 
+349     { 
+350         return $this->api->getFriends(array('player'=>$this->getName())); 
+351     } 
+352  
+353     public function getName() 
+354     { 
+355         if($this->get('displayname', true) != null) 
+356         { 
+357             return $this->get('displayname', true); 
+358         } 
+359         else 
+360         { 
+361             $aliases = $this->get('knownAliases', true, array()); 
+362             if(sizeof($aliases) == 0) 
+363             { 
+364                 return $this->get('playername', true); 
+365             } 
+366             return $aliases[0]; 
+367         } 
+368     } 
+369  
+370     public function getUUID(){ 
+371         return $this->get('uuid'); 
+372     } 
+373  
+374     public function getStats() 
+375     { 
+376         return new Stats($this->get('stats', true, array()), $this->api); 
+377     } 
+378  
+379     public function isPreEULA() 
+380     { 
+381         return $this->get('eulaCoins', true, false); 
+382     } 
+383  
+384     public function getLevel() 
+385     { 
+386         return $this->get('networkLevel', true, 0) + 1; 
+387     } 
+388  
+389     public function isStaff() 
+390     { 
+391         $rank = $this->get('rank', true); 
+392         if($rank == 'NORMAL' || $rank == null) 
+393             return false; 
+394         return true; 
+395     } 
+396  
+397     public function getMultiplier() 
+398     { 
+399         if($this->getRank(false) == 'YOUTUBER') return 7; 
+400         $ranks = array('DEFAULT', 'VIP', 'VIP+', 'MVP', 'MVP+'); 
+401         $pre = $this->getRank(true, true); 
+402         $flip = array_flip($ranks); 
+403         $rankKey = $flip[$pre] + 1; 
+404         $levelKey = floor($this->getLevel() / 25) + 1; 
+405         return ($rankKey > $levelKey) ? $rankKey : $levelKey; 
+406     } 
+407  
+408     public function getRank($package = true, $preEULA = false) 
+409     { 
+410         if($package) 
+411         { 
+412             $keys = array('newPackageRank', 'packageRank'); 
+413             if($preEULA) $keys = array_reverse($keys); 
+414             if(!$this->isStaff()) { 
+415                 if (!$this->isPreEULA()) 
+416                 { 
+417                     if($this->get($keys[0], true)) 
+418                     { 
+419                         return str_replace('_PLUS', '+', $this->get($keys[0], true)); 
+420                     } 
+421                 } 
+422                 else 
+423                 { 
+424                     foreach($keys as $key) 
+425                     { 
+426                         if($this->get($key, true)) 
+427                         { 
+428                             return str_replace('_PLUS', '+', $this->get($key, true)); 
+429                         } 
+430                     } 
+431                 } 
+432             } 
+433             else 
+434             { 
+435                 foreach($keys as $key) 
+436                 { 
+437                     if($this->get($key, true)) 
+438                     { 
+439                         return str_replace('_PLUS', '+', $this->get($key, true)); 
+440                     } 
+441                 } 
+442             } 
+443         } 
+444         else 
+445         { 
+446             $rank = $this->get('rank', true); 
+447             if(!$this->isStaff()) return $this->getRank(true, $preEULA); 
+448             return $rank; 
+449         } 
+450         return 'DEFAULT'; 
+451     } 
+452  
+453     public function getAchievements() { 
+454  
+455     } 
+456  
+457     public function getAchievementPoints() { 
+458         return 'WIP'; 
+459     } 
+460 } 
+461  
+462 class OneTimeAchievement { 
+463  
+464 } 
+465 class TieredAchievement { 
+466  
+467 } 
+468 class Tier { 
+469  
+470 } 
+471  
+472 class Stats extends HypixelObject { 
+473     public function getGame($game) 
+474     { 
+475         return new GameStats(isset($this->JSONArray[$game]) ? $this->JSONArray[$game] : null, $this->api); 
+476     } 
+477 } 
+478 class GameStats extends HypixelObject { /* Dummy for now */ } 
+479  
+480 class Session extends HypixelObject { 
+481     public function getPlayers() { 
+482         return $this->get('players', true); 
+483     } 
+484  
+485     public function getGame() { 
+486         return $this->get('gameType', true); 
+487     } 
+488  
+489     public function getServer() { 
+490         return $this->get('server', true); 
+491     } 
+492 } 
+493  
+494 class Friends extends HypixelObject { /* Dummy for now */ } 
+495  
+496 class Guild extends HypixelObject 
+497 { 
+498     private $members; 
+499  
+500     public function getName() 
+501     { 
+502         return $this->get('name', true); 
+503     } 
+504  
+505     public function canTag() 
+506     { 
+507         return $this->get('canTag', true); 
+508     } 
+509  
+510     public function getTag() 
+511     { 
+512         return $this->get('tag', true); 
+513     } 
+514  
+515     public function getCoins() 
+516     { 
+517         return $this->get('coins', true); 
+518     } 
+519  
+520     public function getMemberList() 
+521     { 
+522         if($this->members != null) 
+523             return $this->members; 
+524         $this->members = new MemberList($this->JSONArray['members'], $this->api); 
+525         return $this->getMemberList(); 
+526     } 
+527  
+528     public function getMemberCount() 
+529     { 
+530         if($this->members == null) 
+531             $this->members = new MemberList($this->JSONArray['members'], $this->api); 
+532         return $this->members->getMemberCount(); 
+533     } 
+534  
+535     public function getMaxMembers() 
+536     { 
+537         $upgrades = array(0,5,5,5,5,5,5,5,5,10,5,5,5,5,5,5,5,10); 
+538         $base = 25; 
+539  
+540         $total = 0; 
+541         for($i = 0; $i <= $this->get('memberSizeLevel', true, 0); $i++) 
+542         { 
+543             @$total += $upgrades[$i]; 
+544         } 
+545  
+546         $total += $base; 
+547         return $total; 
+548     } 
+549 } 
+550 class MemberList extends HypixelObject { 
+551     private $list; 
+552     private $count; 
+553  
+554     public function __construct($json, $api) 
+555     { 
+556         $this->JSONArray = $json; 
+557         $this->api = $api; 
+558  
+559         $list = array("GUILDMASTER"=>array(), "OFFICER"=>array(), "MEMBER"=>array()); 
+560         $this->count = sizeof($json); 
+561         foreach($json as $player) 
+562         { 
+563             $rank = $player['rank']; 
+564             if(!in_array($rank, array_keys($list))) 
+565             { 
+566                 $list[$rank] = array(); 
+567             } 
+568  
+569             array_push($list[$rank], $player); 
+570         } 
+571         $this->list = $list; 
+572     } 
+573  
+574     public function getList() 
+575     { 
+576         return $this->list; 
+577     } 
+578  
+579     public function getMemberCount() 
+580     { 
+581         return $this->count; 
